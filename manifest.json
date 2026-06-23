@@ -1,0 +1,8 @@
+{
+  "display_name": "Pixiv 图片搜索",
+  "plugin_id": "pixiv_image_searcher",
+  "version": "1.3.0",
+  "author": "znq19",
+  "description": "从 Pixiv 搜索高人气图片并直接发送到 QQ",
+  "repo": null
+}
