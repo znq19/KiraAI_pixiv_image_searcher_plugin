@@ -72,7 +72,7 @@ KiraAI/
 
 ### 方式一：使用本仓库附带的工具
 
-本仓库附带一个独立的 `pixiv-token-tool` 工具，双击运行即可：
+本仓库附带一个独立的 `[pixiv-token-tool](https://github.com/znq19/pixiv-token-tool)`  工具，双击运行即可：
 
 ```text
 pixiv-token-tool/
