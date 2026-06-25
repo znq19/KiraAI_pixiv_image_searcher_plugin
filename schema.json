@@ -56,7 +56,7 @@
   "max_search_pages": {
     "type": "integer",
     "name": "最大搜索页数",
-    "default": 100,
+    "default": 1000,
     "minimum": 1,
     "maximum": 5000
   },
@@ -121,5 +121,24 @@
     "default": 20,
     "minimum": 1,
     "maximum": 100
+  },
+  "send_as_forward": {
+    "type": "switch",
+    "name": "以合并转发形式发送",
+    "default": true,
+    "hint": "开启后多张图片以合并转发发送，关闭则逐条发送"
+  },
+  "enable_title_search": {
+    "type": "switch",
+    "name": "开启标题和简介搜索",
+    "default": true,
+    "hint": "关闭后，只搜索标签，不搜索标题和简介"
+  },
+  "search_priority": {
+    "type": "enum",
+    "name": "优先搜索项",
+    "default": "tags",
+    "options": ["tags", "title"],
+    "hint": "tags=优先标签，title=优先标题+简介（仅在开启标题搜索时生效）"
   }
 }
