@@ -1,7 +1,7 @@
 {
   "display_name": "Pixiv 图片搜索",
   "plugin_id": "pixiv_image_searcher",
-  "version": "1.3.0",
+  "version": "1.3.5",
   "author": "znq19",
   "description": "从 Pixiv 搜索高人气图片并直接发送到 QQ",
   "repo": "https://github.com/znq19/KiraAI_pixiv_image_searcher_plugin"
