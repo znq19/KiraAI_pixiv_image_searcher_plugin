@@ -11,6 +11,14 @@
     "default": "",
     "hint": "例如 http://127.0.0.1:7890，留空表示不使用代理"
   },
+  "timeout": {
+    "type": "integer",
+    "name": "请求超时（秒）",
+    "default": 90,
+    "minimum": 5,
+    "maximum": 360,
+    "hint": "Pixiv API 请求（搜索、详情、下载）的超时时间，如果网络不稳定和经常发送原图，建议时间至少90秒"
+  },
   "max_count": {
     "type": "integer",
     "name": "最大返回张数",
