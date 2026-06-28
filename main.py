@@ -66,9 +66,9 @@ class PixivPlugin(BasePlugin):
         self.cleanup_count = cfg.get("cleanup_count", 20)
         self.max_search_pages = cfg.get("max_search_pages", 10)
         self.keyword_map = {**DEFAULT_KEYWORD_MAP, **dict(cfg.get("keyword_map", {}))}
-        # 新增配置
         self.enable_title_search = cfg.get("enable_title_search", True)
-        self.search_priority = cfg.get("search_priority", "tags")  # "tags" 或 "title"
+        self.search_priority = cfg.get("search_priority", "tags")
+        self.timeout = cfg.get("timeout", 90)  # ⭐ 超时配置，默认90秒
         self.api = None
         self._sent_ids: dict[str, float] = {}
 
@@ -89,13 +89,11 @@ class PixivPlugin(BasePlugin):
             logger.warning(f"[PixivPlugin] 初始化异常，插件已禁用: {e}")
 
     def _init_api(self) -> bool:
-        """初始化 API 并验证 token，返回是否成功。"""
         try:
             self.api = AppPixivAPI()
             if self.proxy:
                 self.api.set_proxy(self.proxy)
             self.api.auth(refresh_token=self.refresh_token)
-            # 验证 token
             self.api.user_detail(self.api.user_id)
             logger.info("[PixivPlugin] Token 验证通过")
             return True
@@ -104,10 +102,8 @@ class PixivPlugin(BasePlugin):
             self.api = None
             return False
 
-    # ---------- 判断是否为认证错误 ----------
     @staticmethod
     def _is_auth_error_from_result(result) -> bool:
-        """检查 API 返回结果是否包含认证错误。"""
         if result is None:
             return False
         error_msg = None
@@ -125,14 +121,11 @@ class PixivPlugin(BasePlugin):
 
     @staticmethod
     def _is_auth_exception(exc: Exception) -> bool:
-        """判断异常是否为认证相关错误。"""
         msg = str(exc).lower()
         keywords = ["invalid_grant", "oauth", "access token", "authentication", "unauthorized"]
         return any(k in msg for k in keywords)
 
-    # ---------- 自动重试（封装 API 调用） ----------
     def _call_with_reauth(self, func: Callable, *args, **kwargs):
-        """执行 func，如果发生认证错误则重新认证并重试一次。"""
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -145,7 +138,6 @@ class PixivPlugin(BasePlugin):
             logger.info("[PixivPlugin] 重新认证成功，重试请求")
             return func(*args, **kwargs)
 
-    # ---------- 原有业务方法 ----------
     async def terminate(self):
         self.api = None
 
@@ -179,7 +171,6 @@ class PixivPlugin(BasePlugin):
             if not whitelist:
                 return True
             return sid in whitelist
-        # 群聊
         if not whitelist:
             return False
         return sid in whitelist
@@ -198,7 +189,7 @@ class PixivPlugin(BasePlugin):
             tags = [t for t in tags if t != "R-18G"]
         return tags
 
-    # ---------- 持久化去重 ----------
+    # ---------- 去重 ----------
     def _load_sent_ids(self) -> None:
         try:
             if self.dedup_file.exists():
@@ -254,7 +245,7 @@ class PixivPlugin(BasePlugin):
             return False
         return True
 
-    # ---------- 图片缓存 ----------
+    # ---------- 缓存 ----------
     def _get_storage_dir(self) -> Path:
         return Path(get_data_path()) / self.image_storage_dir
 
@@ -279,7 +270,7 @@ class PixivPlugin(BasePlugin):
         except Exception as e:
             logger.warning(f"图片缓存清理异常: {e}")
 
-    # ---------- 高级搜索（会检查返回错误） ----------
+    # ---------- 搜索 ----------
     def _search_illust_advanced_sync(self, keyword: str, offset: int | None = None, search_target: str = "partial_match_for_tags"):
         url = "%s/v1/search/illust" % self.api.hosts
         params = {
@@ -292,7 +283,6 @@ class PixivPlugin(BasePlugin):
         if self.min_bookmarks > 0:
             params["bookmark_num_min"] = self.min_bookmarks
 
-        # 先尝试 popular_desc
         try:
             params["sort"] = "popular_desc"
             r = self._call_with_reauth(self.api.no_auth_requests_call, "GET", url, params=params, req_auth=True)
@@ -306,15 +296,12 @@ class PixivPlugin(BasePlugin):
         except Exception as e:
             logger.debug(f"popular_desc 搜索失败: {e}")
 
-        # 回退 date_desc + bookmark_num_min
         params["sort"] = "date_desc"
         r = self._call_with_reauth(self.api.no_auth_requests_call, "GET", url, params=params, req_auth=True)
         result = self.api.parse_result(r)
         return result
 
-    # ---------- 核心搜索与过滤（整合回退逻辑） ----------
     def _do_search_and_collect(self, keyword: str, search_target: str) -> List:
-        """执行一次完整的搜索（含翻页），返回 illust 列表"""
         all_illusts = []
         next_url = None
         for page in range(self.max_search_pages):
@@ -330,7 +317,6 @@ class PixivPlugin(BasePlugin):
             if result is None:
                 break
             if self._is_auth_error_from_result(result):
-                # 认证错误直接抛出，由外层重试
                 raise RuntimeError("Authentication error in search response")
             if isinstance(result, dict) and result.get("error"):
                 logger.error(f"API 返回错误: {result['error']}")
@@ -349,7 +335,6 @@ class PixivPlugin(BasePlugin):
         return all_illusts
 
     def _filter_and_sort_illusts(self, illusts: List, count: int, is_dm: bool, sid: str) -> List[str]:
-        """排序、过滤、去重，返回 ID 列表"""
         if not illusts:
             return []
 
@@ -378,26 +363,23 @@ class PixivPlugin(BasePlugin):
         if not self.api:
             raise RuntimeError("API 未初始化")
 
-        # 如果关闭标题搜索，只搜一次标签
         if not self.enable_title_search:
             illusts = self._do_search_and_collect(keyword, "partial_match_for_tags")
             if not illusts:
                 return []
             return self._filter_and_sort_illusts(illusts, count, is_dm, sid)
 
-        # 开启标题搜索，根据优先级决定顺序
         priority = self.search_priority
         if priority == "tags":
             primary_target = "partial_match_for_tags"
             fallback_target = "title_and_caption"
-        else:  # "title"
+        else:
             primary_target = "title_and_caption"
             fallback_target = "partial_match_for_tags"
 
         logger.info(f"优先搜索模式: {primary_target}")
         illusts = self._do_search_and_collect(keyword, primary_target)
 
-        # 如果优先搜索无结果，执行回退搜索
         if not illusts:
             logger.info(f"优先搜索无结果，回退到: {fallback_target}")
             illusts = self._do_search_and_collect(keyword, fallback_target)
@@ -409,9 +391,15 @@ class PixivPlugin(BasePlugin):
 
     async def _fetch_ids(self, keyword: str, count: int, is_dm: bool, sid: str) -> List[str]:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._fetch_ids_sync, keyword, count, is_dm, sid)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, self._fetch_ids_sync, keyword, count, is_dm, sid),
+                timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"Pixiv 搜索超时（{self.timeout} 秒）")
 
-    # ---------- 下载图片 ----------
+    # ---------- 下载 ----------
     def _download_image_sync(self, img_url: str, illust_id: str) -> str | None:
         if not self.api:
             return None
@@ -431,7 +419,7 @@ class PixivPlugin(BasePlugin):
                 path=str(storage_dir),
                 name=f"{illust_id}{ext}",
                 replace=True,
-                referer="https://app-api.pixiv.net/",
+                referer="https://app-api.pixiv.net/"
             )
             if ok and local_path.exists() and local_path.stat().st_size > 0:
                 return str(local_path)
@@ -443,9 +431,16 @@ class PixivPlugin(BasePlugin):
 
     async def _download_image(self, img_url: str, illust_id: str) -> str | None:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._download_image_sync, img_url, illust_id)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, self._download_image_sync, img_url, illust_id),
+                timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"下载图片 {illust_id} 超时（{self.timeout} 秒）")
+            return None
 
-    # ---------- 直接发送 ----------
+    # ---------- 发送 ----------
     async def _send_image_directly(self, event: KiraMessageBatchEvent, local_path: str) -> bool:
         try:
             session_id = getattr(event, "sid", None)
@@ -520,7 +515,7 @@ class PixivPlugin(BasePlugin):
             logger.error(f"合并转发发送失败: {e}")
             return False
 
-    # ---------- 选择 URL ----------
+    # ---------- 辅助 ----------
     def _get_image_url(self, illust, use_original: bool) -> str | None:
         image_urls = getattr(illust, "image_urls", {}) or {}
 
@@ -542,7 +537,6 @@ class PixivPlugin(BasePlugin):
     def _is_pixiv_id(s: str) -> bool:
         return s.isdigit() and 6 <= len(s) <= 12
 
-    # ---------- 根据 ID 获取图片 ----------
     async def _get_illust_path_by_id(self, illust_id: str, use_original: bool, is_dm: bool, sid: str) -> tuple[bool, str]:
         try:
             detail = await asyncio.get_running_loop().run_in_executor(
@@ -571,7 +565,7 @@ class PixivPlugin(BasePlugin):
             logger.error(f"处理作品 {illust_id} 失败: {e}")
             return False, str(e)
 
-    # ---------- 工具注册 ----------
+    # ---------- 工具 ----------
     @tool(
         "pixiv_search_and_send",
         "从 Pixiv 搜索高人气图片（按收藏数排序）并直接发送到当前聊天。支持过滤低收藏数和排除标签。默认发送预览图，可指定原图。",
@@ -586,7 +580,6 @@ class PixivPlugin(BasePlugin):
         },
     )
     async def pixiv_search_and_send(self, event: KiraMessageBatchEvent, keyword: str, count: int = 1, original: bool = False) -> str:
-        # ---- 如果 API 未初始化，先尝试初始化 ----
         if not self.api and not self._init_api():
             return "未初始化"
 
@@ -610,7 +603,7 @@ class PixivPlugin(BasePlugin):
         if search_keyword != keyword:
             logger.info(f"关键词转换：{keyword} -> {search_keyword}")
 
-        # ---- 纯数字 ID 处理（带重试） ----
+        # ---- 纯数字 ID 处理 ----
         if self._is_pixiv_id(search_keyword):
             logger.info(f"检测到 Pixiv 作品 ID：{search_keyword}")
             max_retries = 2
@@ -645,9 +638,11 @@ class PixivPlugin(BasePlugin):
                     return f"发送失败：{info}"
             return f"发送失败：重试后仍失败"
 
-        # ---- 搜索模式（带重试） ----
+        # ---- 搜索模式 ----
         max_retries = 2
+        ids = []
         last_error = None
+
         for attempt in range(max_retries):
             try:
                 ids = await self._fetch_ids(search_keyword, count, is_dm, sid)
@@ -667,13 +662,12 @@ class PixivPlugin(BasePlugin):
                         break
                 else:
                     break
-        else:
-            if last_error:
-                return f"搜索失败：{str(last_error)}"
-            return "搜索失败"
 
-        # ---- 下载并发送图片 ----
-        pending: List[tuple[str, str]] = []  # (wid, local_path)
+        if not ids:
+            return f"搜索失败：{str(last_error) if last_error else '无结果或未知错误'}"
+
+        # ---- 下载并发送 ----
+        pending: List[tuple[str, str]] = []
         for wid in ids[:count]:
             try:
                 detail = await asyncio.get_running_loop().run_in_executor(
