@@ -224,6 +224,10 @@ pixivpy>=3.7.0
 <details>
 <summary><b>📝 点击展开查看更新日志</b></summary>
 
+### v1.4.2
+
+  - 兼容 KiraAI 3.0 GA 弃用面：`ctx.message_processor.send_message_chain` → `ctx.send_message_chain`（两代等价）。零行为变化。
+
 ### v1.4.1 (2026-10-12)
 
 **新增**

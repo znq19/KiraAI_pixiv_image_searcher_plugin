@@ -628,7 +628,7 @@ class PixivPlugin(BasePlugin):
 
             img = Image(local_path, caption="")
             chain = MessageChain([img])
-            result = await self.ctx.message_processor.send_message_chain(session_id, chain)
+            result = await self.ctx.send_message_chain(session_id, chain)
             return result.ok
         except Exception as e:
             logger.error(f"直接发送图片失败: {e}")
