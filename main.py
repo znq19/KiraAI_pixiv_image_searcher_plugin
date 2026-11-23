@@ -13,6 +13,16 @@ from core.utils.path_utils import get_data_path
 from pixivpy3 import AppPixivAPI
 
 
+def _supports_timeout(fn) -> bool:
+    """客户端 send_action 是否接受 timeout 关键字（老核心没有这个形参）。"""
+    try:
+        import inspect
+
+        return "timeout" in inspect.signature(fn).parameters
+    except Exception:
+        return False
+
+
 def _session_id_of(event) -> str:
     """取会话 id（`adapter_name:gm|dm:target`）。
 
@@ -83,6 +93,8 @@ class PixivPlugin(BasePlugin):
         self.image_storage_dir = cfg.get("image_storage_dir", "files/pixiv")
         self.download_original = cfg.get("download_original", False)
         self.send_as_forward = cfg.get("send_as_forward", True)
+        # 合并转发等待回包秒数（NapCat 默认 10s，转发要打包上传图片，常不够）
+        self.forward_timeout = float(cfg.get("forward_timeout", 60) or 0)
         self.max_cache_files = cfg.get("max_cache_files", 50)
         self.cleanup_count = cfg.get("cleanup_count", 20)
         self.max_search_pages = cfg.get("max_search_pages", 10)
@@ -683,16 +695,12 @@ class PixivPlugin(BasePlugin):
                     },
                 })
 
-            if session_type == "gm":
-                await client.send_action("send_forward_msg", {
-                    "group_id": int(target_id),
-                    "messages": nodes,
-                })
-            else:
-                await client.send_action("send_forward_msg", {
-                    "user_id": int(target_id),
-                    "messages": nodes,
-                })
+            fwd_timeout = float(getattr(self, "forward_timeout", 0) or 0)
+            kw = {"timeout": fwd_timeout} if fwd_timeout > 0 and _supports_timeout(
+                client.send_action) else {}
+            params = {"group_id": int(target_id)} if session_type == "gm" else {"user_id": int(target_id)}
+            params["messages"] = nodes
+            await client.send_action("send_forward_msg", params, **kw)
             return True
         except Exception as e:
             logger.error(f"合并转发发送失败: {e}")
