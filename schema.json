@@ -136,6 +136,14 @@
     "default": true,
     "hint": "开启后多张图片以合并转发发送，关闭则逐条发送"
   },
+  "forward_timeout": {
+    "type": "integer",
+    "name": "合并转发等待秒数",
+    "default": 60,
+    "minimum": 0,
+    "maximum": 300,
+    "hint": "等待 NapCat 回包的最长秒数。合并转发要先打包上传内容，比普通消息慢得多，框架默认只有 10 秒，转发很容易在打包完成前就超时（超时后插件会降级重发，于是同一内容发两遍）。默认 60 秒；填 0 表示沿用框架默认值"
+  },
   "enable_title_search": {
     "type": "switch",
     "name": "开启标题和简介搜索",
